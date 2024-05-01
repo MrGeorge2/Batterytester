@@ -11,24 +11,28 @@ void setup()
   pinMode(OLED_SDA_PIN, OUTPUT);
   pinMode(OLED_SLC_PIN, OUTPUT);
 
-  pinMode(BAT_SWITCH_PIN, OUTPUT);
   pinMode(BAT_VOLTAGE_PIN, INPUT);
 
-  pinMode(PWN_OUTPUT_BAT_HIGH, OUTPUT);
-  pinMode(PWN_OUTPUT_BAT_LOW, OUTPUT); 
+  pinMode(PWN_OUTPUT_BAT_LOW, OUTPUT);
 
- buttonDownPressedMilis = 0;
- buttonUpPressedMilis = 0;
+  buttonDownPressedMilis = 0;
+  buttonUpPressedMilis = 0;
 
- analogWriteResolution(8);
- analogWriteFreq(40000);
+  analogWriteResolution(8);
+  analogWriteFreq(40000);
 
- analogWrite(PWN_OUTPUT_BAT_HIGH, 0);
- analogWrite(PWN_OUTPUT_BAT_LOW, 0);
+  analogWrite(PWN_OUTPUT_BAT_LOW, 0);
+
+  initDisplay();
 }
 
 void loop()
 {
+  if (testStopMillis != 0)
+  {
+    printFinalResults();
+    return;
+  }
 
   if (!isTestRunning)
   {
@@ -36,97 +40,86 @@ void loop()
     return;
   }
 
-  if (isTestRunning)
-  {
-    startTestIfNotStarted();
+  printOnlineResults();
+}
+
+void initDisplay(){
+  // SSD1306_SWITCHCAPVCC = generate display voltage from 3.3V internally
+  if(!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) { 
+    Serial.println(F("SSD1306 allocation failed"));
+    for(;;); // Don't proceed, loop forever
   }
 
+  // Show initial display buffer contents on the screen --
+  // the library initializes this with an Adafruit splash screen.
+  display.display();
+  delay(2000); // Pause for 2 seconds
+
+  // Clear the buffer
+  display.clearDisplay();
+
+  displayDischargeCurrent(testCurrentMah);
+}
+
+void printOnlineResults()
+{
   unsigned long actualRunnedMillisLow = millis();
-  bool testLowIsRunning = checkBateryLevel(PWN_OUTPUT_BAT_LOW, LOW, testStopLow);
-  if (testStopLow != nullptr)
-    actualRunnedMillisLow = *testStopLow;
+  isTestRunning = checkBateryLevel();
+  if (testStopMillis != 0)
+    actualRunnedMillisLow = testStopMillis;
 
-  unsigned long actualRunnedMillisHigh = millis();
-  bool testHighIsRunning = checkBateryLevel(PWN_OUTPUT_BAT_HIGH, HIGH, testStopHigh);
-  if (testStopHigh != nullptr)
-    actualRunnedMillisHigh = *testStopHigh;
-
-  if (!testHighIsRunning && !testLowIsRunning)
+  if (!isTestRunning)
   {
-    isTestRunning = false;
     Serial.println("Test finished");
   }
 
-
-  if (isTestRunning)
-  {
-    printResults(actualRunnedMillisLow, actualRunnedMillisHigh);
-    delay(300);
-  }
+  printResults(actualRunnedMillisLow);
+  delay(1000);
 }
 
-void printResults(unsigned long actualRunnedMillisLow, unsigned long actualRunnedMillisHigh)
+void printFinalResults()
 {
-  unsigned long lowCapacityMah = calculateCapacityInMAH(testStartLow, &actualRunnedMillisLow, testCurrentMah);
-  unsigned long highCapacityMah = calculateCapacityInMAH(testStartHigh, &actualRunnedMillisHigh, testCurrentMah);
-
-  Serial.print("Low capacity mAh ");
-  Serial.print(lowCapacityMah);
-  Serial.println();
-
-  Serial.print("High capacity mAh " );
-  Serial.print(highCapacityMah);
-  Serial.println();
-
-  double lowBatVoltage = getBatteryVoltage(PWN_OUTPUT_BAT_HIGH, HIGH);
-  double highBatVoltage = getBatteryVoltage(PWN_OUTPUT_BAT_LOW, LOW);
-
-  Serial.print("Low battary voltage ");
-  Serial.print(lowBatVoltage);
-  Serial.println();
-
-  Serial.print("High battary voltage ");
-  Serial.print(highBatVoltage);
-  Serial.println();
+  analogWrite(PWN_OUTPUT_BAT_LOW, 0);
+  Serial.println("Test finished");
+  printResults(testStopMillis);
+  delay(1000);
 }
 
-double getBatteryVoltage(unsigned long batPwmPin, uint8_t lowHigh)
+void printResults(unsigned long actualRunnedMillisLow)
 {
-  digitalWrite(BAT_SWITCH_PIN, lowHigh);
+  unsigned long batCapacityMah = calculateCapacityInMAH(actualRunnedMillisLow, testCurrentMah);
 
-  // For to be cartain wait some time before reading  battery voltage
-  delay(10);
+  Serial.print("Capacity mAh ");
+  Serial.print(batCapacityMah);
+  Serial.println();
 
+  double batVoltage = getBatteryVoltage();
+
+  Serial.print("Battary voltage ");
+  Serial.print(batVoltage);
+  Serial.println();
+
+  displayBatteryInfo(batVoltage, batCapacityMah, testStopMillis != 0);
+}
+
+double getBatteryVoltage()
+{
   double voltageNotScaled = analogRead(BAT_VOLTAGE_PIN);
   double maxScale = 1023;
 
-  double batVoltage = (voltageNotScaled / maxScale) * 3.3 * 2;
-  
-  // Add N MOSphet loss
-  if (batPwmPin == HIGH){
-    batVoltage += nMosLoss;
-  }else {
-    batVoltage += pMosLoss;
-  }
+  double batVoltage = (voltageNotScaled / maxScale) * 3.3 * VOLTAGE_DIVIDER_PRECISE;
 
   return batVoltage;
 }
 
-bool checkBateryLevel(unsigned long batPwmPin, uint8_t lowHigh, unsigned long *testStopPointer)
+bool checkBateryLevel()
 {
-  return true;
-  double batVoltage = getBatteryVoltage(batPwmPin, lowHigh);
+  double batVoltage = getBatteryVoltage();
   Serial.println(batVoltage);
   if (batVoltage <= 2.5)
   {
-    int pwm = analogRead(BAT_SWITCH_PIN);
-    if (pwm == 0){
-      return false;
-    }
-
-    analogWrite(batPwmPin, 0);
-    unsigned long millisNow = millis();
-    testStopPointer = &millisNow;
+    analogWrite(PWN_OUTPUT_BAT_LOW, 0);
+    testStopMillis = millis();
     return false;
   }
 
@@ -137,7 +130,7 @@ int calculatePWM()
 {
   double voltage = (testCurrentMah / 1000) * resistorValueOhm;
 
-  int pwm =  (255 * voltage) / 3.3;
+  int pwm = (255 * voltage) / 3.3;
 
   Serial.print("Test current ");
   Serial.println(testCurrentMah);
@@ -158,7 +151,7 @@ void setupTestCurrent()
 {
   unsigned long upPressedTime = 0;
   unsigned long downPressedTime = 0;
-  
+
   if (digitalRead(BUTTON_DOWN_PIN) == LOW)
   {
     Serial.println("Button low pressed");
@@ -177,13 +170,15 @@ void setupTestCurrent()
     {
       testCurrentMah -= plusCurrentMah;
 
-      if (testCurrentMah < minCurrentMah){
+      if (testCurrentMah < minCurrentMah)
+      {
         testCurrentMah = maxCurrentMah;
       }
 
       Serial.print("Setting test current to ");
       Serial.print(testCurrentMah);
       Serial.println();
+      displayDischargeCurrent(testCurrentMah);
     }
 
     buttonDownPressedMilis = 0;
@@ -206,18 +201,19 @@ void setupTestCurrent()
     {
       testCurrentMah += plusCurrentMah;
 
-      if (testCurrentMah > maxCurrentMah){
+      if (testCurrentMah > maxCurrentMah)
+      {
         testCurrentMah = minCurrentMah;
       }
 
       Serial.print("Setting test current to ");
       Serial.print(testCurrentMah);
       Serial.println();
+      displayDischargeCurrent(testCurrentMah);
     }
-    
+
     buttonUpPressedMilis = 0;
   }
-
 
   if (upPressedTime > debounceTimeMs && downPressedTime > debounceTimeMs)
   {
@@ -225,37 +221,68 @@ void setupTestCurrent()
     isTestRunning = true;
     upPressedTime = 0;
     downPressedTime = 0;
-    return;
-  }
-}
-
-void startTestIfNotStarted()
-{
-  // test started but not initialized yet
-  if (testStartLow == nullptr || testStartHigh == nullptr)
-  {
-    unsigned long millisNow = millis();
-    testStartLow = &millisNow;
-    testStartHigh = &millisNow;
+    
+    testStartMillis = millis();
+    Serial.print("Setting test start millis ");
+    Serial.println(testStartMillis);
 
     int pwmValue = calculatePWM();
     Serial.print("PWM ");
     Serial.println(pwmValue);
-    analogWrite(PWN_OUTPUT_BAT_HIGH, pwmValue);
     analogWrite(PWN_OUTPUT_BAT_LOW, pwmValue);
   }
 }
 
-unsigned long calculateCapacityInMAH(unsigned long *testStart, unsigned long *testStop, unsigned int testCurrentMah)
+double calculateCapacityInMAH(unsigned long testStop, unsigned int testCurrentMah)
 {
-  if (testStart == nullptr || testStop == nullptr)
+  Serial.print("Test stop ");
+  Serial.println(testStop);
+  Serial.print("Test start ");
+  Serial.println(testStartMillis);
+  if (testStartMillis == 0 || testStop == 0)
   {
     return 0;
   }
 
-  unsigned long testRun = *testStop - *testStart;
+  double testRun = testStop - testStartMillis;
+  Serial.print("Test run ");
+  Serial.println(testRun);
 
-  unsigned long batteryCapacityMah = (testCurrentMah * testRun) / 3600000;
+  double batteryCapacityMah = testCurrentMah * (testRun / 3600000);
 
   return batteryCapacityMah;
+}
+
+void displayDischargeCurrent(double current) {
+  display.clearDisplay();
+
+  display.setTextSize(2);             // Normal 1:1 pixel scale
+  display.setTextColor(WHITE);        // Draw white text
+  display.setCursor(0,0);             // Start at top-left corner
+  display.println("Discharge current: ");
+  display.println();
+  display.println(current);
+
+  display.display();
+}
+
+void displayBatteryInfo(double voltage, double capacity, bool isFinished) {
+  display.clearDisplay();
+
+  display.setTextSize(1);             // Normal 1:1 pixel scale
+  display.setTextColor(WHITE);        // Draw white text
+  display.setCursor(0,0);             // Start at top-left corner
+  display.println("Battery voltage: ");
+  display.println(voltage);
+  display.println();
+
+  display.println("Battery Capacity: ");
+  display.println(capacity);
+  display.println();
+
+  display.println("Is test finished: ");
+  display.println(isFinished);
+  display.println();
+
+  display.display();
 }

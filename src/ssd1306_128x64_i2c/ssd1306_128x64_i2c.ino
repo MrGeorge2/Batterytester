@@ -58,24 +58,24 @@ void setup() {
   // Clear the buffer
   display.clearDisplay();
   
-  testDischargeCurrent(1600.0);
+  displayDischargeCurrent(1600.0);
   
-  testDischargeCurrent(1700.1);
+  displayDischargeCurrent(1700.1);
 
-  batteryInfo(3.14, 1.2, false);
-  batteryInfo(4.20, 3500, true);
+  displayBatteryInfo(3.14, 1.2, false);
+  displayBatteryInfo(4.20, 3500, true);
 }
 
 void loop(){
-   testDischargeCurrent(1600.0);
+   displayDischargeCurrent(1600.0);
   
-  testDischargeCurrent(1700.1);
+  displayDischargeCurrent(1700.1);
 
-  batteryInfo(3.14, 1.2, false);
-  batteryInfo(4.20, 3500, true);
+  displayBatteryInfo(3.14, 1.2, false);
+  displayBatteryInfo(4.20, 3500, true);
 }
 
-void testDischargeCurrent(double current) {
+void displayDischargeCurrent(double current) {
   display.clearDisplay();
 
   display.setTextSize(2);             // Normal 1:1 pixel scale
@@ -89,7 +89,7 @@ void testDischargeCurrent(double current) {
   delay(2000);
 }
 
-void batteryInfo(double voltage, double capacity, bool isFinished) {
+void displayBatteryInfo(double voltage, double capacity, bool isFinished) {
   display.clearDisplay();
 
   display.setTextSize(1);             // Normal 1:1 pixel scale
